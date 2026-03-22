@@ -615,6 +615,26 @@ def format_duration(seconds):
     return f"{seconds:.1f}s"
 
 
+def save_audio_to_path(audio_path: str, save_path: str) -> str:
+    """Copy generated audio to a user-specified path."""
+    if not audio_path:
+        return "No audio to save"
+    if not save_path or not save_path.strip():
+        return "Please enter a save path"
+    save_path = os.path.expanduser(save_path.strip())
+    dest = Path(save_path)
+    if dest.is_dir() or save_path.endswith("/"):
+        dest.mkdir(parents=True, exist_ok=True)
+        dest = dest / Path(audio_path).name
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(audio_path, dest)
+    except Exception as e:
+        return f"Error: {e}"
+    return f"Saved to {dest}"
+
+
 def save_to_history(
     audio_path, text, voice_info, tab_type, gen_time=None, model_name=None, params=None
 ):
@@ -3355,6 +3375,17 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                                 label="Generated Audio", type="filepath"
                             )
                             cv_download = gr.File(label="Download Audio", visible=False)
+                            with gr.Row():
+                                cv_save_path = gr.Textbox(
+                                    value="~/Desktop",
+                                    label="Save to",
+                                    placeholder="~/Desktop/my_audio.wav",
+                                    scale=3,
+                                )
+                                cv_saveas_btn = gr.Button("Save", size="sm", scale=1)
+                                cv_save_status = gr.Textbox(
+                                    show_label=False, interactive=False, scale=2
+                                )
 
                             gr.HTML(
                                 '<div class="history-section"><div class="history-header">Recent History</div></div>'
@@ -3507,6 +3538,17 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                             vc_status = gr.Textbox(label="Status", interactive=False)
                             vc_output = gr.Audio(label="Test Output", type="filepath")
                             vc_download = gr.File(label="Download Audio", visible=False)
+                            with gr.Row():
+                                vc_save_path = gr.Textbox(
+                                    value="~/Desktop",
+                                    label="Save to",
+                                    placeholder="~/Desktop/my_audio.wav",
+                                    scale=3,
+                                )
+                                vc_saveas_btn = gr.Button("Save", size="sm", scale=1)
+                                vc_save_status = gr.Textbox(
+                                    show_label=False, interactive=False, scale=2
+                                )
 
                             gr.HTML(
                                 '<div class="section-header" style="margin-top:1rem;">Save Cloned Voice</div>'
@@ -3593,6 +3635,17 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                                 label="Generated Audio", type="filepath"
                             )
                             sv_download = gr.File(label="Download Audio", visible=False)
+                            with gr.Row():
+                                sv_save_path = gr.Textbox(
+                                    value="~/Desktop",
+                                    label="Save to",
+                                    placeholder="~/Desktop/my_audio.wav",
+                                    scale=3,
+                                )
+                                sv_saveas_btn = gr.Button("Save", size="sm", scale=1)
+                                sv_save_status = gr.Textbox(
+                                    show_label=False, interactive=False, scale=2
+                                )
 
                             gr.HTML(
                                 '<div class="history-section"><div class="history-header">Recent History</div></div>'
@@ -4289,6 +4342,17 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                             podcast_download = gr.File(
                                 label="Download Podcast", visible=False
                             )
+                            with gr.Row():
+                                podcast_save_path = gr.Textbox(
+                                    value="~/Desktop",
+                                    label="Save to",
+                                    placeholder="~/Desktop/my_podcast.wav",
+                                    scale=3,
+                                )
+                                podcast_saveas_btn = gr.Button("Save", size="sm", scale=1)
+                                podcast_save_status = gr.Textbox(
+                                    show_label=False, interactive=False, scale=2
+                                )
 
                             gr.HTML(
                                 '<div class="history-section"><div class="history-header">Podcast History</div></div>'
@@ -5718,6 +5782,27 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
     podcast_refresh_voices_btn.click(
         fn=refresh_podcast_voice_dropdowns,
         outputs=[slot[1] for slot in podcast_speaker_slots],
+    )
+
+    cv_saveas_btn.click(
+        fn=save_audio_to_path,
+        inputs=[cv_audio, cv_save_path],
+        outputs=[cv_save_status],
+    )
+    vc_saveas_btn.click(
+        fn=save_audio_to_path,
+        inputs=[vc_output, vc_save_path],
+        outputs=[vc_save_status],
+    )
+    sv_saveas_btn.click(
+        fn=save_audio_to_path,
+        inputs=[sv_audio, sv_save_path],
+        outputs=[sv_save_status],
+    )
+    podcast_saveas_btn.click(
+        fn=save_audio_to_path,
+        inputs=[podcast_final_audio, podcast_save_path],
+        outputs=[podcast_save_status],
     )
 
 if __name__ == "__main__":
