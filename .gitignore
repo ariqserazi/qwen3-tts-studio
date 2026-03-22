@@ -1,0 +1,91 @@
+# Environment
+.env
+.env.local
+.env.*.local
+.venv/
+venv/
+ENV/
+env/
+qwen-tts-env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Models (large files - download separately)
+Qwen3-TTS-12Hz-*/
+Qwen3-TTS-Tokenizer-12Hz/
+Qwen3-TTS/
+
+# User data
+generation_history/
+podcasts/
+saved_voices/
+personas/
+tts_settings.json
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gradio
+.gradio/
+
+# Dev tools
+.omc/
+.sisyphus/
+.claude/
+
+# Test files
+test_*.py
+run_all_tests.sh
+validate_*.py
+generate_*_podcast.py
+
+# Test artifacts
+test_screenshots/
+*.png
+!docs/*.png
+
+# Status/report files
+BOULDER_*.md
+WORK_COMPLETE.txt
+IMPLEMENTATION_COMPLETE.md
+PODCAST_FEATURE_COMPLETE.md
+E2E_TEST_REPORT.md
+TASK_*_COMPLETION_SUMMARY.md
+VERIFICATION_EVIDENCE.md
+.BOULDER_STOP
+START_HERE.md
+README_TESTING.md
+README_PODCAST_TESTING.md
+README_USER_ACTION_REQUIRED.md
+TESTING_GUIDE.md

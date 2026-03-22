@@ -1,0 +1,13 @@
+{
+  "typeCheckingMode": "basic",
+  "reportImplicitRelativeImport": "none",
+  "reportMissingImports": "none",
+  "reportDeprecated": "none",
+  "reportExplicitAny": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownArgumentType": "none",
+  "reportAny": "none",
+  "reportImplicitStringConcatenation": "none",
+  "reportAssignmentType": "none"
+}
