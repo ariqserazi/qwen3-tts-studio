@@ -1,0 +1,8 @@
+torch 
+gradio 
+soundfile 
+numpy 
+openai 
+librosa 
+scipy
+qwen-tts

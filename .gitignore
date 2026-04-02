@@ -8,6 +8,7 @@ ENV/
 env/
 qwen-tts-env/
 
+
 # Python
 __pycache__/
 *.py[cod]
@@ -41,7 +42,9 @@ podcasts/
 saved_voices/
 personas/
 tts_settings.json
-
+/autoPauseCode
+/oldcode
+/oldcode2
 # Logs
 *.log
 

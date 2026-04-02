@@ -88,6 +88,8 @@ from audio.embedding_utils import (
 )
 
 PAUSE_RE = re.compile(r"\[pause:(\d+(\.\d+)?)\]")
+PARAGRAPH_BREAK_RE = re.compile(r"(?:\r?\n){2,}")
+AUTO_PARAGRAPH_PAUSE_SEC = 0.35
 
 def _mac_safe_torch_cleanup():
     """
@@ -203,6 +205,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 
 OUTPUT_DIR_FILE = (PROJECT_ROOT / "output_dir.json").resolve()
 DEFAULT_OUTPUT_DIR = (PROJECT_ROOT / "outputs").resolve()
+DEFAULT_USER_SAVE_DIR = ((Path.home() / "Desktop") if (Path.home() / "Desktop").exists() else Path.home()).resolve()
+SAVE_BROWSER_ROOT = str(Path.home())
 
 BASE_OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 HISTORY_DIR = BASE_OUTPUT_DIR / "generation_history"
@@ -521,6 +525,25 @@ def _prompt_to_cpu(prompt_items):
     return out
 
 
+def _append_speech_with_paragraph_pauses(plan, speech: str):
+    speech = speech.strip()
+    if not speech:
+        return
+
+    pos = 0
+    for match in PARAGRAPH_BREAK_RE.finditer(speech):
+        start, end = match.span()
+        chunk = speech[pos:start].strip()
+        if chunk:
+            plan.append({"type": "speech", "text": chunk})
+        plan.append({"type": "pause", "duration": AUTO_PARAGRAPH_PAUSE_SEC})
+        pos = end
+
+    tail = speech[pos:].strip()
+    if tail:
+        plan.append({"type": "speech", "text": tail})
+
+
 def _process_text_with_pauses(text: str):
     plan = []
     pos = 0
@@ -529,16 +552,14 @@ def _process_text_with_pauses(text: str):
         start, end = match.span()
         duration = float(match.group(1))
 
-        speech = text[pos:start].strip()
-        if speech:
-            plan.append({"type": "speech", "text": speech})
+        speech = text[pos:start]
+        _append_speech_with_paragraph_pauses(plan, speech)
 
         plan.append({"type": "pause", "duration": duration})
         pos = end
 
-    tail = text[pos:].strip()
-    if tail:
-        plan.append({"type": "speech", "text": tail})
+    tail = text[pos:]
+    _append_speech_with_paragraph_pauses(plan, tail)
 
     return plan
 
@@ -615,24 +636,69 @@ def format_duration(seconds):
     return f"{seconds:.1f}s"
 
 
-def save_audio_to_path(audio_path: str, save_path: str) -> str:
-    """Copy generated audio to a user-specified path."""
+def _get_folder_from_selection(selection: Any, current_folder: str | None = None) -> Path | None:
+    if isinstance(selection, list):
+        selection = selection[0] if selection else None
+
+    selected = str(selection or "").strip()
+    if not selected:
+        fallback = str(current_folder or "").strip()
+        return Path(fallback).expanduser().resolve() if fallback else None
+
+    path = Path(selected).expanduser().resolve()
+    return path if path.is_dir() else path.parent
+
+
+def use_selected_folder(selection: Any, current_folder: str = ""):
+    folder = _get_folder_from_selection(selection, current_folder)
+    if folder is None:
+        return gr.update(), "Choose a folder in the browser first"
+    return gr.update(value=str(folder)), f"Selected folder: {folder}"
+
+
+def sanitize_audio_filename(file_name: str, fallback_audio_path: str) -> str:
+    source_path = Path(fallback_audio_path)
+    source_suffix = source_path.suffix or ".wav"
+    raw_name = str(file_name or "").strip()
+
+    if not raw_name:
+        return f"{source_path.stem}{source_suffix}"
+
+    raw_name = os.path.basename(raw_name)
+    raw_name = re.sub(r'[\\/:*?"<>|]+', "_", raw_name).strip().strip(".")
+    if not raw_name:
+        raw_name = source_path.stem
+
+    requested_suffix = Path(raw_name).suffix
+    if requested_suffix.lower() != source_suffix.lower():
+        raw_name = f"{Path(raw_name).stem}{source_suffix}"
+
+    return raw_name
+
+
+def save_audio_to_path(audio_path: str, save_folder: str, file_name: str) -> str:
+    """Copy generated audio to a user-selected folder using a custom file name."""
     if not audio_path:
         return "No audio to save"
-    if not save_path or not save_path.strip():
-        return "Please enter a save path"
-    save_path = os.path.expanduser(save_path.strip())
-    dest = Path(save_path)
-    if dest.is_dir() or save_path.endswith("/"):
-        dest.mkdir(parents=True, exist_ok=True)
-        dest = dest / Path(audio_path).name
-    else:
-        dest.parent.mkdir(parents=True, exist_ok=True)
+
+    source_path = Path(audio_path).expanduser().resolve()
+    if not source_path.exists():
+        return f"Audio file not found: {source_path}"
+
+    folder_raw = str(save_folder or "").strip()
+    if not folder_raw:
+        return "Please choose a save folder"
+
     try:
-        shutil.copy2(audio_path, dest)
+        destination_folder = Path(folder_raw).expanduser().resolve()
+        destination_folder.mkdir(parents=True, exist_ok=True)
+
+        final_name = sanitize_audio_filename(file_name, str(source_path))
+        destination_path = destination_folder / final_name
+        shutil.copy2(source_path, destination_path)
+        return f"Saved to {destination_path}"
     except Exception as e:
-        return f"Error: {e}"
-    return f"Saved to {dest}"
+        return f"Error: {format_user_error(e)}"
 
 
 def save_to_history(
@@ -1345,6 +1411,143 @@ def generate_custom_voice(
     except Exception as e:
         raise gr.Error(format_user_error(e))
     finally:
+        wavs = None
+        _mac_safe_torch_cleanup()
+
+
+def generate_voice_design(
+    text,
+    voice_description,
+    language,
+    temperature,
+    top_k,
+    top_p,
+    repetition_penalty,
+    max_new_tokens,
+    sub_temp,
+    sub_top_k,
+    sub_top_p,
+    progress=gr.Progress(),
+):
+    if not text.strip():
+        raise gr.Error("Please enter text to generate")
+
+    if not voice_description.strip():
+        raise gr.Error("Please enter a voice description")
+
+    MAX_VOICE_DESC_LENGTH = 500
+    if len(voice_description) > MAX_VOICE_DESC_LENGTH:
+        raise gr.Error(
+            f"Voice description too long ({len(voice_description)} chars). Maximum is {MAX_VOICE_DESC_LENGTH}."
+        )
+
+    if len(text) > MAX_CHARS:
+        raise gr.Error(f"Text too long ({len(text)} chars). Maximum is {MAX_CHARS}.")
+
+    save_settings(
+        {
+            "temperature": temperature,
+            "top_k": top_k,
+            "top_p": top_p,
+            "repetition_penalty": repetition_penalty,
+            "max_new_tokens": max_new_tokens,
+            "subtalker_temperature": sub_temp,
+            "subtalker_top_k": sub_top_k,
+            "subtalker_top_p": sub_top_p,
+        }
+    )
+
+    start_time = time.time()
+    char_count = len(text)
+    auto_max_tokens = estimate_max_tokens(text)
+    est_time = max(10, char_count * 0.15)
+
+    wavs = None
+    temp_path = None
+    try:
+        progress(0.1, desc="Loading VoiceDesign model...")
+        model = get_model("1.7B-VoiceDesign")
+
+        if not hasattr(model, "generate_voice_design"):
+            raise gr.Error(
+                "VoiceDesign model doesn't support generate_voice_design(). "
+                "Please ensure you have the correct model downloaded."
+            )
+
+        load_time = time.time() - start_time
+
+        progress(
+            0.2,
+            desc=f"Model loaded ({load_time:.1f}s). Generating ~{est_time:.0f}s for {char_count} chars...",
+        )
+
+        actual_language = language if language and language != "auto" else None
+        text = enhance_punctuation_for_tts(text)
+
+        gen_kwargs = {
+            "text": text,
+            "instruct": voice_description.strip(),
+            "non_streaming_mode": True,
+            "temperature": temperature,
+            "top_k": int(top_k),
+            "top_p": top_p,
+            "repetition_penalty": repetition_penalty,
+            "max_new_tokens": auto_max_tokens,
+            "subtalker_temperature": sub_temp,
+            "subtalker_top_k": int(sub_top_k),
+            "subtalker_top_p": sub_top_p,
+        }
+        if actual_language:
+            gen_kwargs["language"] = actual_language
+
+        wavs, sr = model.generate_voice_design(**gen_kwargs)
+
+        if wavs is None or len(wavs) == 0:
+            raise gr.Error(
+                "Model returned empty audio. Try different parameters or voice description."
+            )
+
+        gen_time = time.time() - start_time
+
+        progress(0.9, desc=f"Saving audio ({gen_time:.1f}s)...")
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            temp_path = f.name
+            sf.write(temp_path, wavs[0], sr)
+
+        history_path = save_to_history(
+            temp_path,
+            text,
+            "VoiceDesign",
+            "design",
+            gen_time,
+            model_name="1.7B-VoiceDesign",
+            params={
+                "temperature": temperature,
+                "top_k": int(top_k),
+                "top_p": top_p,
+                "repetition_penalty": repetition_penalty,
+                "max_new_tokens": auto_max_tokens,
+                "subtalker_temperature": sub_temp,
+                "subtalker_top_k": int(sub_top_k),
+                "subtalker_top_p": sub_top_p,
+                "language": actual_language,
+                "voice_description": voice_description.strip(),
+            },
+        )
+
+        duration = get_audio_duration(history_path)
+        status = f"Done in {gen_time:.1f}s | Duration: {format_duration(duration)} | Tokens: {auto_max_tokens} • Saved to History ✓"
+
+        progress(1.0, desc="Complete!")
+        return history_path, status
+    except Exception as e:
+        raise gr.Error(format_user_error(e))
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
         wavs = None
         _mac_safe_torch_cleanup()
 
@@ -3293,6 +3496,17 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
         output_dir_apply = gr.Button("Apply", scale=1)
         output_dir_open = gr.Button("Open", scale=1)
 
+    with gr.Accordion("Browse folders on this Mac", open=False):
+        gr.Markdown("Select a folder directly, or click any file inside the folder you want to use.")
+        output_dir_browser = gr.FileExplorer(
+            root_dir=SAVE_BROWSER_ROOT,
+            glob="**/*",
+            file_count="single",
+            label="Folder browser",
+            height=220,
+        )
+        output_dir_use_selected = gr.Button("Use selected folder", size="sm")
+
     output_dir_status = gr.Textbox(label="", interactive=False, show_label=False)
 
     output_dir_apply.click(
@@ -3305,6 +3519,12 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
         fn=open_folder_in_finder,
         inputs=[output_dir_text],
         outputs=[output_dir_status],
+    )
+
+    output_dir_use_selected.click(
+        fn=use_selected_folder,
+        inputs=[output_dir_browser, output_dir_text],
+        outputs=[output_dir_text, output_dir_status],
     )
     gr.HTML("""
     <div class="main-header">
@@ -3376,16 +3596,32 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                             )
                             cv_download = gr.File(label="Download Audio", visible=False)
                             with gr.Row():
-                                cv_save_path = gr.Textbox(
-                                    value="~/Desktop",
-                                    label="Save to",
-                                    placeholder="~/Desktop/my_audio.wav",
-                                    scale=3,
+                                cv_save_folder = gr.Textbox(
+                                    value=str(DEFAULT_USER_SAVE_DIR),
+                                    label="Save folder",
+                                    placeholder="Choose a folder on your Mac",
+                                    scale=2,
+                                )
+                                cv_file_name = gr.Textbox(
+                                    value="",
+                                    label="File name",
+                                    placeholder="my_audio",
+                                    scale=2,
                                 )
                                 cv_saveas_btn = gr.Button("Save", size="sm", scale=1)
-                                cv_save_status = gr.Textbox(
-                                    show_label=False, interactive=False, scale=2
+                            with gr.Accordion("Browse folders on this Mac", open=False):
+                                gr.Markdown("Pick a folder, or click any file inside the folder you want to use.")
+                                cv_folder_browser = gr.FileExplorer(
+                                    root_dir=SAVE_BROWSER_ROOT,
+                                    glob="**/*",
+                                    file_count="single",
+                                    label="Folder browser",
+                                    height=220,
                                 )
+                                cv_use_folder_btn = gr.Button("Use selected folder", size="sm")
+                            cv_audio_save_status = gr.Textbox(
+                                show_label=False, interactive=False
+                            )
 
                             gr.HTML(
                                 '<div class="history-section"><div class="history-header">Recent History</div></div>'
@@ -3539,16 +3775,32 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                             vc_output = gr.Audio(label="Test Output", type="filepath")
                             vc_download = gr.File(label="Download Audio", visible=False)
                             with gr.Row():
-                                vc_save_path = gr.Textbox(
-                                    value="~/Desktop",
-                                    label="Save to",
-                                    placeholder="~/Desktop/my_audio.wav",
-                                    scale=3,
+                                vc_save_folder = gr.Textbox(
+                                    value=str(DEFAULT_USER_SAVE_DIR),
+                                    label="Save folder",
+                                    placeholder="Choose a folder on your Mac",
+                                    scale=2,
+                                )
+                                vc_file_name = gr.Textbox(
+                                    value="",
+                                    label="File name",
+                                    placeholder="my_cloned_voice",
+                                    scale=2,
                                 )
                                 vc_saveas_btn = gr.Button("Save", size="sm", scale=1)
-                                vc_save_status = gr.Textbox(
-                                    show_label=False, interactive=False, scale=2
+                            with gr.Accordion("Browse folders on this Mac", open=False):
+                                gr.Markdown("Pick a folder, or click any file inside the folder you want to use.")
+                                vc_folder_browser = gr.FileExplorer(
+                                    root_dir=SAVE_BROWSER_ROOT,
+                                    glob="**/*",
+                                    file_count="single",
+                                    label="Folder browser",
+                                    height=220,
                                 )
+                                vc_use_folder_btn = gr.Button("Use selected folder", size="sm")
+                            vc_audio_save_status = gr.Textbox(
+                                show_label=False, interactive=False
+                            )
 
                             gr.HTML(
                                 '<div class="section-header" style="margin-top:1rem;">Save Cloned Voice</div>'
@@ -3572,11 +3824,75 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                                 placeholder="Best for narration, avoid singing...",
                                 lines=1,
                             )
-                            vc_save_status = gr.Textbox(
+                            vc_voice_save_status = gr.Textbox(
                                 label="", interactive=False, show_label=False
                             )
 
                     vc_samples_meta_json = gr.State(value="")
+
+                with gr.TabItem("Voice Design", id="design"):
+                    with gr.Row():
+                        with gr.Column(scale=1):
+                            gr.HTML(
+                                '<div class="section-header">Voice Description</div>'
+                            )
+                            gr.Markdown(
+                                "*Describe the voice you want in natural language. "
+                                "Include age, gender, tone, emotion, accent, etc.*"
+                            )
+
+                            vd_description = gr.Textbox(
+                                label="Voice Description",
+                                placeholder="A warm female voice with a British accent, speaking softly and calmly...",
+                                lines=4,
+                                info="Describe the desired voice characteristics",
+                            )
+
+                            vd_language = gr.Dropdown(
+                                choices=LANGUAGES,
+                                value="auto",
+                                label="Language",
+                                info="Auto-detect or specify language",
+                            )
+
+                            gr.HTML(
+                                '<div class="section-header" style="margin-top:1rem;">Example Descriptions</div>'
+                            )
+                            gr.Markdown(
+                                """
+**Examples:**
+- "A cheerful young female voice with high pitch and energetic tone"
+- "Deep male voice, mature, authoritative, speaking slowly and clearly"
+- "Elderly woman, warm and gentle, with a slight tremor in voice"
+                                """,
+                                elem_classes=["info-text"],
+                            )
+
+                        with gr.Column(scale=2):
+                            gr.HTML('<div class="section-header">Text Input</div>')
+
+                            vd_text = gr.Textbox(
+                                label="Text to Speak",
+                                placeholder="Enter the text you want to convert to speech...",
+                                lines=4,
+                                max_lines=8,
+                            )
+                            vd_char_count = gr.HTML(value=update_char_count(""))
+
+                            vd_btn = gr.Button(
+                                "Generate Speech",
+                                variant="primary",
+                                elem_classes=["generate-btn"],
+                                size="lg",
+                            )
+
+                            vd_status = gr.Textbox(
+                                label="Status", interactive=False, show_label=True
+                            )
+
+                            vd_audio = gr.Audio(
+                                label="Generated Audio", type="filepath"
+                            )
 
                 with gr.TabItem("Saved Voices", id="saved"):
                     with gr.Row():
@@ -3636,16 +3952,32 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                             )
                             sv_download = gr.File(label="Download Audio", visible=False)
                             with gr.Row():
-                                sv_save_path = gr.Textbox(
-                                    value="~/Desktop",
-                                    label="Save to",
-                                    placeholder="~/Desktop/my_audio.wav",
-                                    scale=3,
+                                sv_save_folder = gr.Textbox(
+                                    value=str(DEFAULT_USER_SAVE_DIR),
+                                    label="Save folder",
+                                    placeholder="Choose a folder on your Mac",
+                                    scale=2,
+                                )
+                                sv_file_name = gr.Textbox(
+                                    value="",
+                                    label="File name",
+                                    placeholder="my_saved_voice_audio",
+                                    scale=2,
                                 )
                                 sv_saveas_btn = gr.Button("Save", size="sm", scale=1)
-                                sv_save_status = gr.Textbox(
-                                    show_label=False, interactive=False, scale=2
+                            with gr.Accordion("Browse folders on this Mac", open=False):
+                                gr.Markdown("Pick a folder, or click any file inside the folder you want to use.")
+                                sv_folder_browser = gr.FileExplorer(
+                                    root_dir=SAVE_BROWSER_ROOT,
+                                    glob="**/*",
+                                    file_count="single",
+                                    label="Folder browser",
+                                    height=220,
                                 )
+                                sv_use_folder_btn = gr.Button("Use selected folder", size="sm")
+                            sv_audio_save_status = gr.Textbox(
+                                show_label=False, interactive=False
+                            )
 
                             gr.HTML(
                                 '<div class="history-section"><div class="history-header">Recent History</div></div>'
@@ -4343,16 +4675,32 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                                 label="Download Podcast", visible=False
                             )
                             with gr.Row():
-                                podcast_save_path = gr.Textbox(
-                                    value="~/Desktop",
-                                    label="Save to",
-                                    placeholder="~/Desktop/my_podcast.wav",
-                                    scale=3,
+                                podcast_save_folder = gr.Textbox(
+                                    value=str(DEFAULT_USER_SAVE_DIR),
+                                    label="Save folder",
+                                    placeholder="Choose a folder on your Mac",
+                                    scale=2,
+                                )
+                                podcast_file_name = gr.Textbox(
+                                    value="",
+                                    label="File name",
+                                    placeholder="my_podcast",
+                                    scale=2,
                                 )
                                 podcast_saveas_btn = gr.Button("Save", size="sm", scale=1)
-                                podcast_save_status = gr.Textbox(
-                                    show_label=False, interactive=False, scale=2
+                            with gr.Accordion("Browse folders on this Mac", open=False):
+                                gr.Markdown("Pick a folder, or click any file inside the folder you want to use.")
+                                podcast_folder_browser = gr.FileExplorer(
+                                    root_dir=SAVE_BROWSER_ROOT,
+                                    glob="**/*",
+                                    file_count="single",
+                                    label="Folder browser",
+                                    height=220,
                                 )
+                                podcast_use_folder_btn = gr.Button("Use selected folder", size="sm")
+                            podcast_audio_save_status = gr.Textbox(
+                                show_label=False, interactive=False
+                            )
 
                             gr.HTML(
                                 '<div class="history-section"><div class="history-header">Podcast History</div></div>'
@@ -5656,6 +6004,20 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
         show_progress="hidden",
     )
 
+    vd_text.change(fn=update_char_count, inputs=[vd_text], outputs=[vd_char_count])
+
+    vd_btn.click(
+        fn=generate_voice_design,
+        inputs=[vd_text, vd_description, vd_language] + all_param_sliders,
+        outputs=[vd_audio, vd_status],
+        concurrency_limit=1,
+        concurrency_id="generation",
+    ).then(
+        fn=lambda: (gr.update(choices=get_history_choices()), gr.update(choices=get_history_choices())),
+        outputs=[cv_history_dropdown, sv_history_dropdown],
+        show_progress="hidden",
+    )
+
     def build_transcripts_json(files, t1, t2, t3):
         transcripts = {}
         if files:
@@ -5731,7 +6093,7 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
             current_clone_model,
             vc_samples_meta_json,
         ],
-        outputs=[vc_save_status, sv_voice_dropdown],
+        outputs=[vc_voice_save_status, sv_voice_dropdown],
     ).then(
         fn=lambda: [gr.update(choices=_get_podcast_voice_choices()) for _ in range(4)],
         outputs=[slot[1] for slot in podcast_speaker_slots],
@@ -5784,25 +6146,46 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
         outputs=[slot[1] for slot in podcast_speaker_slots],
     )
 
+    cv_use_folder_btn.click(
+        fn=use_selected_folder,
+        inputs=[cv_folder_browser, cv_save_folder],
+        outputs=[cv_save_folder, cv_audio_save_status],
+    )
+    vc_use_folder_btn.click(
+        fn=use_selected_folder,
+        inputs=[vc_folder_browser, vc_save_folder],
+        outputs=[vc_save_folder, vc_audio_save_status],
+    )
+    sv_use_folder_btn.click(
+        fn=use_selected_folder,
+        inputs=[sv_folder_browser, sv_save_folder],
+        outputs=[sv_save_folder, sv_audio_save_status],
+    )
+    podcast_use_folder_btn.click(
+        fn=use_selected_folder,
+        inputs=[podcast_folder_browser, podcast_save_folder],
+        outputs=[podcast_save_folder, podcast_audio_save_status],
+    )
+
     cv_saveas_btn.click(
         fn=save_audio_to_path,
-        inputs=[cv_audio, cv_save_path],
-        outputs=[cv_save_status],
+        inputs=[cv_audio, cv_save_folder, cv_file_name],
+        outputs=[cv_audio_save_status],
     )
     vc_saveas_btn.click(
         fn=save_audio_to_path,
-        inputs=[vc_output, vc_save_path],
-        outputs=[vc_save_status],
+        inputs=[vc_output, vc_save_folder, vc_file_name],
+        outputs=[vc_audio_save_status],
     )
     sv_saveas_btn.click(
         fn=save_audio_to_path,
-        inputs=[sv_audio, sv_save_path],
-        outputs=[sv_save_status],
+        inputs=[sv_audio, sv_save_folder, sv_file_name],
+        outputs=[sv_audio_save_status],
     )
     podcast_saveas_btn.click(
         fn=save_audio_to_path,
-        inputs=[podcast_final_audio, podcast_save_path],
-        outputs=[podcast_save_status],
+        inputs=[podcast_final_audio, podcast_save_folder, podcast_file_name],
+        outputs=[podcast_audio_save_status],
     )
 
 if __name__ == "__main__":

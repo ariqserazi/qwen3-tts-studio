@@ -199,6 +199,14 @@ def format_user_error(error: Exception) -> str:
             return msg
     return f"An error occurred: {error_str[:200]}"
 
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+OUTPUT_DIR_FILE = (PROJECT_ROOT / "output_dir.json").resolve()
+DEFAULT_OUTPUT_DIR = (PROJECT_ROOT / "outputs").resolve()
+
+BASE_OUTPUT_DIR = DEFAULT_OUTPUT_DIR
+HISTORY_DIR = BASE_OUTPUT_DIR / "generation_history"
+PODCASTS_DIR = BASE_OUTPUT_DIR / "podcasts"
 
 SAVED_VOICES_DIR = Path("saved_voices")
 SAVED_VOICES_DIR.mkdir(exist_ok=True)
@@ -605,6 +613,26 @@ def format_duration(seconds):
         secs = int(seconds % 60)
         return f"{mins}:{secs:02d}"
     return f"{seconds:.1f}s"
+
+
+def save_audio_to_path(audio_path: str, save_path: str) -> str:
+    """Copy generated audio to a user-specified path."""
+    if not audio_path:
+        return "No audio to save"
+    if not save_path or not save_path.strip():
+        return "Please enter a save path"
+    save_path = os.path.expanduser(save_path.strip())
+    dest = Path(save_path)
+    if dest.is_dir() or save_path.endswith("/"):
+        dest.mkdir(parents=True, exist_ok=True)
+        dest = dest / Path(audio_path).name
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy2(audio_path, dest)
+    except Exception as e:
+        return f"Error: {e}"
+    return f"Saved to {dest}"
 
 
 def save_to_history(
@@ -2139,8 +2167,963 @@ LANGUAGES = [
     "russian",
     "spanish",
 ]
+custom_css = """
+# /* ===== MONOTONE MINIMAL DESIGN ===== */
+# :root {
+#     --gray-50: #f8f9fa;
+#     --gray-100: #f1f3f5;
+#     --gray-200: #e9ecef;
+#     --gray-300: #dee2e6;
+#     --gray-400: #ced4da;
+#     --gray-500: #6c757d;
+#     --gray-600: #5a6268;
+#     --gray-700: #495057;
+#     --gray-800: #343a40;
+#     --gray-900: #212529;
+#     --white: #ffffff;
+#     --radius: 4px;
+# }
 
-custom_css = """<YOUR ORIGINAL custom_css STRING HERE>"""
+# /* Hide Gradio footer and settings */
+# footer { display: none !important; }
+# .gradio-container > .wrap > .contain > footer { display: none !important; }
+# .settings-btn, [class*="settings"] { display: none !important; }
+# .built-with { display: none !important; }
+
+# .gradio-container {
+#     max-width: 1400px !important;
+#     margin: 0 auto;
+#     background: var(--gray-50) !important;
+# }
+
+# /* ===== HEADER ===== */
+# .main-header {
+#     text-align: center;
+#     padding: 1.25rem 0;
+#     margin-bottom: 1rem;
+#     border-bottom: 1px solid var(--gray-200);
+# }
+
+# .main-title {
+#     font-size: 1.5rem;
+#     font-weight: 600;
+#     color: var(--gray-800);
+#     margin: 0;
+#     letter-spacing: -0.01em;
+# }
+
+# .sub-title {
+#     color: var(--gray-600);
+#     font-size: 0.875rem;
+#     margin: 0.25rem 0 0;
+# }
+
+# /* ===== SECTION HEADERS ===== */
+# .section-header {
+#     font-size: 0.75rem;
+#     font-weight: 600;
+#     color: var(--gray-600);
+#     text-transform: uppercase;
+#     letter-spacing: 0.05em;
+#     margin-bottom: 0.75rem;
+#     padding-bottom: 0.5rem;
+#     border-bottom: 1px solid var(--gray-200);
+# }
+
+# /* ===== PARAMETERS PANEL ===== */
+# .params-panel {
+#     background: var(--white);
+#     border: 1px solid var(--gray-200);
+#     border-radius: var(--radius);
+#     padding: 1rem;
+# }
+
+# .panel-header-compact {
+#     font-size: 0.8rem;
+#     font-weight: 600;
+#     color: var(--gray-800);
+#     margin-bottom: 0.75rem;
+#     padding-bottom: 0.5rem;
+#     border-bottom: 1px solid var(--gray-300);
+# }
+
+# /* ===== SAVE INDICATOR ===== */
+# .save-indicator {
+#     display: inline-block;
+#     font-size: 0.75rem;
+#     color: var(--gray-600);
+#     opacity: 0;
+#     transition: opacity 0.3s ease;
+#     padding: 0.25rem 0.5rem;
+#     background: var(--gray-100);
+#     border-radius: var(--radius);
+# }
+
+# .save-indicator.show {
+#     opacity: 1;
+#     animation: fadeInOut 3s ease;
+# }
+
+# .param-changed {
+#     animation: highlight-change 1s ease;
+# }
+
+# @keyframes fadeInOut {
+#     0% { opacity: 0; }
+#     10% { opacity: 1; }
+#     80% { opacity: 1; }
+#     100% { opacity: 0; }
+# }
+
+# @keyframes highlight-change {
+#     0% { background: rgba(100, 100, 200, 0.2); }
+#     100% { background: transparent; }
+# }
+
+# /* ===== PRESET BUTTONS ===== */
+# .preset-btn-group {
+#     display: flex;
+#     gap: 0.5rem;
+#     margin-bottom: 0.75rem;
+# }
+
+# .preset-section {
+#     background: var(--gray-100);
+#     border: 1px solid var(--gray-200);
+#     border-radius: var(--radius);
+#     padding: 0.75rem;
+#     margin-bottom: 0.75rem;
+# }
+
+# .preset-btn-lg {
+#     padding: 0.5rem 0.75rem !important;
+#     font-size: 0.8rem !important;
+#     font-weight: 500 !important;
+#     border-radius: var(--radius) !important;
+#     background: var(--white) !important;
+#     border: 1px solid var(--gray-300) !important;
+#     color: var(--gray-700) !important;
+# }
+
+# .preset-btn-lg:hover {
+#     background: var(--gray-100) !important;
+#     border-color: var(--gray-400) !important;
+# }
+
+# .preset-btn-fast, .preset-btn-quality {
+#     border-color: var(--gray-300) !important;
+# }
+
+# /* ===== CHARACTER COUNTER ===== */
+# .char-count {
+#     font-size: 0.75rem;
+#     color: var(--gray-600);
+#     padding: 0.25rem 0.5rem;
+#     background: var(--gray-100);
+#     border-radius: var(--radius);
+#     display: inline-block;
+# }
+
+# .char-count.char-warning {
+#     color: var(--gray-700);
+#     background: var(--gray-200);
+# }
+
+# .char-count.char-error {
+#     color: var(--gray-800);
+#     background: var(--gray-300);
+#     font-weight: 500;
+# }
+
+# /* ===== GENERATE BUTTON ===== */
+# .generate-btn {
+#     min-height: 44px !important;
+#     font-size: 0.9rem !important;
+#     font-weight: 500 !important;
+#     border-radius: var(--radius) !important;
+#     background: var(--gray-800) !important;
+#     border: none !important;
+#     color: var(--white) !important;
+# }
+
+# .generate-btn:hover {
+#     background: var(--gray-900) !important;
+# }
+
+# /* ===== HISTORY SECTION ===== */
+# .history-section {
+#     margin-top: 1.5rem;
+#     padding-top: 1rem;
+#     border-top: 1px solid var(--gray-200);
+# }
+
+# .history-header {
+#     font-size: 0.75rem;
+#     font-weight: 600;
+#     color: var(--gray-700);
+#     text-transform: uppercase;
+#     letter-spacing: 0.05em;
+#     margin-bottom: 0.75rem;
+# }
+
+# .history-list {
+#     max-height: 300px;
+#     overflow-y: auto;
+# }
+
+# /* ===== HISTORY ITEMS (Clickable Buttons) ===== */
+# .history-item-btn {
+#     width: 100%;
+#     text-align: left !important;
+#     padding: 0.625rem 0.75rem !important;
+#     margin-bottom: 0.375rem !important;
+#     background: var(--white) !important;
+#     border: 1px solid var(--gray-200) !important;
+#     border-radius: var(--radius) !important;
+#     font-size: 0.8rem !important;
+#     color: var(--gray-800) !important;
+#     cursor: pointer !important;
+#     transition: background 0.15s ease !important;
+# }
+
+# .history-item-btn:hover {
+#     background: var(--gray-100) !important;
+#     border-color: var(--gray-300) !important;
+# }
+
+# .history-item-btn .item-text {
+#     display: block;
+#     font-weight: 400;
+#     white-space: nowrap;
+#     overflow: hidden;
+#     text-overflow: ellipsis;
+# }
+
+# .history-item-btn .item-meta {
+#     font-size: 0.7rem;
+#     color: var(--gray-500);
+#     margin-top: 0.25rem;
+# }
+
+# /* ===== EMPTY STATE ===== */
+# .empty-state {
+#     text-align: center;
+#     padding: 1.5rem;
+#     color: var(--gray-600);
+#     font-size: 0.8rem;
+# }
+
+# /* ===== TABS ===== */
+# .tab-nav button {
+#     font-weight: 500 !important;
+#     padding: 0.625rem 1rem !important;
+#     font-size: 0.85rem !important;
+# }
+
+# /* ===== ACCORDION ===== */
+# .gradio-accordion {
+#     border: 1px solid var(--gray-200) !important;
+#     border-radius: var(--radius) !important;
+#     margin-bottom: 0.5rem !important;
+#     overflow: hidden;
+# }
+
+# .gradio-accordion > .label-wrap {
+#     background: var(--gray-50) !important;
+#     padding: 0.5rem 0.75rem !important;
+#     font-size: 0.8rem !important;
+#     font-weight: 500 !important;
+#     border-bottom: 1px solid var(--gray-200) !important;
+# }
+
+# .gradio-accordion > .label-wrap:hover {
+#     background: var(--gray-100) !important;
+# }
+
+# .gradio-accordion > .wrap {
+#     padding: 0.75rem !important;
+#     background: var(--white) !important;
+# }
+
+# /* ===== COMPACT PARAMS ===== */
+# .compact-params-panel {
+#     font-size: 0.85rem;
+# }
+
+# .compact-params-panel .wrap {
+#     gap: 0.25rem !important;
+# }
+
+# .compact-params-panel input[type="range"] {
+#     height: 4px !important;
+# }
+
+# .compact-params-panel label span {
+#     font-size: 0.8rem !important;
+#     color: var(--gray-700) !important;
+# }
+
+# .compact-params-panel .info {
+#     font-size: 0.7rem !important;
+#     line-height: 1.3 !important;
+#     color: var(--gray-500) !important;
+#     margin-top: 2px !important;
+# }
+
+# .compact-slider-row {
+#     gap: 0.375rem !important;
+# }
+
+# .compact-slider-row > div {
+#     min-width: 0 !important;
+# }
+
+# /* ===== MINI BUTTONS ===== */
+# .mini-btn-row button {
+#     padding: 0.375rem 0.5rem !important;
+#     font-size: 0.75rem !important;
+#     min-height: 28px !important;
+#     background: var(--white) !important;
+#     border: 1px solid var(--gray-300) !important;
+#     color: var(--gray-700) !important;
+# }
+
+# .mini-btn-row button:hover {
+#     background: var(--gray-100) !important;
+# }
+
+# /* ===== RESPONSIVE ===== */
+# @media (max-width: 768px) {
+#     .main-title { font-size: 1.25rem; }
+#     .preset-btn-group { flex-direction: column; }
+# }
+
+# /* ===== HIDE VISUAL NOISE ===== */
+# .section-header-icon { display: none; }
+
+# /* ========================================================================
+#    PODCAST TAB - PREMIUM ELEVATED DESIGN
+#    ======================================================================== */
+
+# /* ===== PODCAST TAB CONTAINER ===== */
+# .podcast-tab {
+#     background: linear-gradient(135deg, var(--gray-50) 0%, #f0f4f8 50%, var(--gray-100) 100%);
+#     border-radius: 12px;
+#     padding: 1.5rem;
+#     position: relative;
+#     overflow: hidden;
+# }
+
+# .podcast-tab::before {
+#     content: '';
+#     position: absolute;
+#     top: 0;
+#     left: 0;
+#     right: 0;
+#     height: 3px;
+#     background: linear-gradient(90deg, var(--gray-400), var(--gray-600), var(--gray-400));
+# }
+
+# /* ===== PODCAST SECTION HEADERS WITH ICONS ===== */
+# .podcast-section-header {
+#     display: flex;
+#     align-items: center;
+#     gap: 0.625rem;
+#     font-size: 0.875rem;
+#     font-weight: 600;
+#     color: var(--gray-800);
+#     text-transform: uppercase;
+#     letter-spacing: 0.04em;
+#     margin-bottom: 1rem;
+#     padding-bottom: 0.625rem;
+#     border-bottom: 2px solid var(--gray-200);
+# }
+
+# .podcast-section-header .section-icon {
+#     font-size: 1.125rem;
+#     display: inline-flex;
+#     align-items: center;
+#     justify-content: center;
+#     width: 28px;
+#     height: 28px;
+#     background: var(--gray-100);
+#     border-radius: 6px;
+# }
+
+# /* Specific section header styles */
+# .podcast-section-content .section-icon { background: linear-gradient(135deg, #f8f9fa, #e9ecef); }
+# .podcast-section-voices .section-icon { background: linear-gradient(135deg, #f1f3f5, #dee2e6); }
+# .podcast-section-draft .section-icon { background: linear-gradient(135deg, #e9ecef, #ced4da); }
+# .podcast-section-generate .section-icon { background: linear-gradient(135deg, #e9ecef, #ced4da); }
+# .podcast-section-output .section-icon { background: linear-gradient(135deg, #f1f3f5, #e9ecef); }
+
+# /* ===== VOICE CARDS ===== */
+# .voice-card-grid {
+#     display: grid;
+#     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+#     gap: 1rem;
+# }
+
+# .voice-card {
+#     background: var(--white);
+#     border: 1px solid var(--gray-200);
+#     border-radius: 10px;
+#     padding: 1rem;
+#     cursor: pointer;
+#     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+#     position: relative;
+#     overflow: hidden;
+# }
+
+# .voice-card::before {
+#     content: '';
+#     position: absolute;
+#     top: 0;
+#     left: 0;
+#     right: 0;
+#     height: 3px;
+#     background: var(--gray-300);
+#     transition: background 0.25s ease;
+# }
+
+# .voice-card:hover {
+#     border-color: var(--gray-400);
+#     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+#     transform: translateY(-2px);
+# }
+
+# .voice-card:hover::before {
+#     background: var(--gray-600);
+# }
+
+# .voice-card.selected {
+#     border-color: var(--gray-600);
+#     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+# }
+
+# .voice-card.selected::before {
+#     background: var(--gray-800);
+# }
+
+# .voice-card-name {
+#     font-weight: 600;
+#     font-size: 0.9rem;
+#     color: var(--gray-800);
+#     margin-bottom: 0.375rem;
+# }
+
+# .voice-card-meta {
+#     font-size: 0.75rem;
+#     color: var(--gray-500);
+# }
+
+# /* Voice Card Role Indicators */
+# .voice-card-role {
+#     display: inline-flex;
+#     align-items: center;
+#     gap: 0.25rem;
+#     padding: 0.25rem 0.5rem;
+#     border-radius: 4px;
+#     font-size: 0.7rem;
+#     font-weight: 600;
+#     text-transform: uppercase;
+#     letter-spacing: 0.03em;
+#     margin-top: 0.5rem;
+# }
+
+# .voice-card-role.host {
+#     background: var(--gray-800);
+#     color: var(--white);
+# }
+
+# .voice-card-role.guest {
+#     background: var(--gray-200);
+#     color: var(--gray-700);
+# }
+
+# .voice-card-role.narrator {
+#     background: var(--gray-100);
+#     color: var(--gray-600);
+#     border: 1px solid var(--gray-300);
+# }
+
+# /* ===== DRAFT PREVIEW WITH TREE INDENTATION ===== */
+# .draft-preview-container {
+#     background: var(--white);
+#     border: 1px solid var(--gray-200);
+#     border-radius: 10px;
+#     padding: 1.25rem;
+#     max-height: 500px;
+#     overflow-y: auto;
+# }
+
+# .draft-segment {
+#     position: relative;
+#     padding-left: 1.5rem;
+#     margin-bottom: 1rem;
+# }
+
+# .draft-segment::before {
+#     content: '';
+#     position: absolute;
+#     left: 0;
+#     top: 0;
+#     bottom: 0;
+#     width: 2px;
+#     background: var(--gray-200);
+#     border-radius: 1px;
+# }
+
+# .draft-segment:last-child::before {
+#     height: 1rem;
+# }
+
+# .draft-segment-title {
+#     font-weight: 600;
+#     font-size: 0.85rem;
+#     color: var(--gray-800);
+#     margin-bottom: 0.5rem;
+#     display: flex;
+#     align-items: center;
+#     gap: 0.5rem;
+# }
+
+# .draft-segment-title::before {
+#     content: '';
+#     width: 8px;
+#     height: 8px;
+#     background: var(--gray-400);
+#     border-radius: 50%;
+#     margin-left: -1.75rem;
+# }
+
+# /* Dialogue Items */
+# .draft-dialogue {
+#     padding: 0.75rem;
+#     margin-bottom: 0.5rem;
+#     background: var(--gray-50);
+#     border-radius: 8px;
+#     border-left: 3px solid transparent;
+#     transition: all 0.2s ease;
+# }
+
+# .draft-dialogue:hover {
+#     background: var(--gray-100);
+# }
+
+# .draft-dialogue.host {
+#     border-left-color: var(--gray-800);
+# }
+
+# .draft-dialogue.guest {
+#     border-left-color: var(--gray-500);
+# }
+
+# .draft-dialogue.narrator {
+#     border-left-color: var(--gray-400);
+#     font-style: italic;
+# }
+
+# /* Speaker Badges */
+# .speaker-badge {
+#     display: inline-flex;
+#     align-items: center;
+#     gap: 0.25rem;
+#     padding: 0.2rem 0.5rem;
+#     border-radius: 4px;
+#     font-size: 0.7rem;
+#     font-weight: 600;
+#     text-transform: uppercase;
+#     letter-spacing: 0.02em;
+#     margin-bottom: 0.375rem;
+# }
+
+# .speaker-badge.host {
+#     background: var(--gray-800);
+#     color: var(--white);
+# }
+
+# .speaker-badge.guest {
+#     background: var(--gray-200);
+#     color: var(--gray-700);
+# }
+
+# .speaker-badge.narrator {
+#     background: transparent;
+#     color: var(--gray-500);
+#     border: 1px solid var(--gray-300);
+# }
+
+# .dialogue-text {
+#     font-size: 0.85rem;
+#     color: var(--gray-700);
+#     line-height: 1.5;
+# }
+
+# /* ===== PROGRESS BAR WITH SMOOTH ANIMATIONS ===== */
+# .podcast-progress-container {
+#     background: var(--white);
+#     border: 1px solid var(--gray-200);
+#     border-radius: 10px;
+#     padding: 1.25rem;
+#     margin-bottom: 1rem;
+# }
+
+# .podcast-progress-bar {
+#     height: 6px;
+#     background: var(--gray-200);
+#     border-radius: 3px;
+#     overflow: hidden;
+#     margin-bottom: 1rem;
+# }
+
+# .podcast-progress-fill {
+#     height: 100%;
+#     background: linear-gradient(90deg, var(--gray-500), var(--gray-700));
+#     border-radius: 3px;
+#     transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+#     position: relative;
+# }
+
+# .podcast-progress-fill::after {
+#     content: '';
+#     position: absolute;
+#     top: 0;
+#     left: 0;
+#     right: 0;
+#     bottom: 0;
+#     background: linear-gradient(
+#         90deg,
+#         transparent 0%,
+#         rgba(255, 255, 255, 0.3) 50%,
+#         transparent 100%
+#     );
+#     animation: progress-shimmer 2s infinite;
+# }
+
+# @keyframes progress-shimmer {
+#     0% { transform: translateX(-100%); }
+#     100% { transform: translateX(100%); }
+# }
+
+# /* Progress Steps */
+# .podcast-progress-steps {
+#     display: flex;
+#     justify-content: space-between;
+#     gap: 0.5rem;
+# }
+
+# .podcast-step {
+#     display: flex;
+#     flex-direction: column;
+#     align-items: center;
+#     flex: 1;
+#     text-align: center;
+# }
+
+# .podcast-step-indicator {
+#     width: 32px;
+#     height: 32px;
+#     border-radius: 50%;
+#     background: var(--gray-100);
+#     border: 2px solid var(--gray-300);
+#     display: flex;
+#     align-items: center;
+#     justify-content: center;
+#     font-size: 0.875rem;
+#     margin-bottom: 0.5rem;
+#     transition: all 0.3s ease;
+# }
+
+# .podcast-step.pending .podcast-step-indicator {
+#     background: var(--gray-100);
+#     border-color: var(--gray-300);
+#     color: var(--gray-500);
+# }
+
+# .podcast-step.active .podcast-step-indicator {
+#     background: var(--gray-200);
+#     border-color: var(--gray-600);
+#     color: var(--gray-800);
+#     animation: pulse-step 1.5s infinite;
+# }
+
+# @keyframes pulse-step {
+#     0%, 100% { box-shadow: 0 0 0 0 rgba(73, 80, 87, 0.4); }
+#     50% { box-shadow: 0 0 0 8px rgba(73, 80, 87, 0); }
+# }
+
+# .podcast-step.completed .podcast-step-indicator {
+#     background: var(--gray-700);
+#     border-color: var(--gray-700);
+#     color: var(--white);
+# }
+
+# .podcast-step.completed .podcast-step-indicator::after {
+#     content: '✓';
+#     font-weight: bold;
+# }
+
+# .podcast-step-label {
+#     font-size: 0.7rem;
+#     font-weight: 500;
+#     color: var(--gray-600);
+#     text-transform: uppercase;
+#     letter-spacing: 0.03em;
+# }
+
+# .podcast-step.active .podcast-step-label {
+#     color: var(--gray-800);
+#     font-weight: 600;
+# }
+
+# .podcast-step.completed .podcast-step-label {
+#     color: var(--gray-700);
+# }
+
+# /* ===== OUTPUT SECTION ===== */
+# .podcast-output-card {
+#     background: linear-gradient(135deg, var(--gray-100), var(--white));
+#     border: 1px solid var(--gray-200);
+#     border-radius: 10px;
+#     padding: 1.25rem;
+#     transition: all 0.3s ease;
+# }
+
+# .podcast-output-card:hover {
+#     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
+# }
+
+# .podcast-audio-player {
+#     background: var(--gray-800);
+#     border-radius: 8px;
+#     padding: 1rem;
+#     margin-top: 0.75rem;
+# }
+
+# .podcast-audio-player audio {
+#     width: 100%;
+# }
+
+# /* ===== HOVER STATES FOR INTERACTIVE ELEMENTS ===== */
+# .podcast-tab button:not(.generate-btn) {
+#     transition: all 0.2s ease;
+# }
+
+# .podcast-tab button:not(.generate-btn):hover {
+#     background: var(--gray-100) !important;
+#     border-color: var(--gray-400) !important;
+# }
+
+# .podcast-tab input:focus,
+# .podcast-tab textarea:focus,
+# .podcast-tab select:focus {
+#     border-color: var(--gray-500) !important;
+#     box-shadow: 0 0 0 3px rgba(73, 80, 87, 0.1) !important;
+#     outline: none !important;
+# }
+
+# .podcast-tab .generate-btn {
+#     background: linear-gradient(135deg, var(--gray-800), var(--gray-900)) !important;
+#     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+#     transition: all 0.3s ease;
+# }
+
+# .podcast-tab .generate-btn:hover {
+#     transform: translateY(-1px);
+#     box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+# }
+
+# .podcast-tab .generate-btn:active {
+#     transform: translateY(0);
+# }
+
+# /* ===== RESPONSIVE DESIGN FOR 1024px+ SCREENS ===== */
+# @media (min-width: 1024px) {
+#     .podcast-tab {
+#         padding: 2rem;
+#     }
+    
+#     .voice-card-grid {
+#         grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+#         gap: 1.25rem;
+#     }
+    
+#     .voice-card {
+#         padding: 1.25rem;
+#     }
+    
+#     .draft-preview-container {
+#         max-height: 600px;
+#     }
+    
+#     .podcast-progress-steps {
+#         gap: 1rem;
+#     }
+    
+#     .podcast-step-indicator {
+#         width: 40px;
+#         height: 40px;
+#         font-size: 1rem;
+#     }
+    
+#     .podcast-step-label {
+#         font-size: 0.75rem;
+#     }
+    
+#     .podcast-section-header {
+#         font-size: 0.9rem;
+#     }
+    
+#     .podcast-section-header .section-icon {
+#         width: 32px;
+#         height: 32px;
+#         font-size: 1.25rem;
+#     }
+# }
+
+# @media (min-width: 1280px) {
+#     .voice-card-grid {
+#         grid-template-columns: repeat(4, 1fr);
+#     }
+    
+#     .podcast-tab {
+#         padding: 2.5rem;
+#     }
+# }
+
+# /* ===== PODCAST TAB SPECIFIC OVERRIDES ===== */
+# .podcast-tab .gradio-accordion {
+#     border-radius: 10px !important;
+#     border-color: var(--gray-200) !important;
+# }
+
+# .podcast-tab .gradio-accordion > .label-wrap {
+#     padding: 0.75rem 1rem !important;
+#     font-size: 0.85rem !important;
+# }
+
+# .podcast-tab .gradio-accordion > .wrap {
+#     padding: 1rem !important;
+# }
+
+# /* ===== PODCAST LOADING STATES ===== */
+# .podcast-loading-skeleton {
+#     background: linear-gradient(
+#         90deg,
+#         var(--gray-100) 25%,
+#         var(--gray-200) 50%,
+#         var(--gray-100) 75%
+#     );
+#     background-size: 200% 100%;
+#     animation: skeleton-shimmer 1.5s infinite;
+#     border-radius: 6px;
+# }
+
+# @keyframes skeleton-shimmer {
+#     0% { background-position: -200% 0; }
+#     100% { background-position: 200% 0; }
+# }
+
+# /* ===== PODCAST CONTENT INPUT ENHANCEMENTS ===== */
+# .podcast-topic-input {
+#     background: var(--white);
+#     border: 2px solid var(--gray-200);
+#     border-radius: 10px;
+#     transition: border-color 0.2s ease;
+# }
+
+# .podcast-topic-input:focus-within {
+#     border-color: var(--gray-500);
+# }
+
+# .podcast-keypoints-list {
+#     list-style: none;
+#     padding: 0;
+#     margin: 0;
+# }
+
+# .podcast-keypoint-item {
+#     display: flex;
+#     align-items: flex-start;
+#     gap: 0.75rem;
+#     padding: 0.75rem;
+#     background: var(--gray-50);
+#     border-radius: 8px;
+#     margin-bottom: 0.5rem;
+#     transition: background 0.2s ease;
+# }
+
+# .podcast-keypoint-item:hover {
+#     background: var(--gray-100);
+# }
+
+# .podcast-keypoint-number {
+#     width: 24px;
+#     height: 24px;
+#     background: var(--gray-200);
+#     border-radius: 50%;
+#     display: flex;
+#     align-items: center;
+#     justify-content: center;
+#     font-size: 0.75rem;
+#     font-weight: 600;
+#     color: var(--gray-700);
+#     flex-shrink: 0;
+# }
+
+# /* ===== PODCAST TAB NAVIGATION HIGHLIGHT ===== */
+# .tab-nav button[aria-selected="true"].podcast-tab-btn {
+#     background: linear-gradient(180deg, var(--white), var(--gray-50)) !important;
+#     border-bottom: 2px solid var(--gray-700) !important;
+#     color: var(--gray-900) !important;
+#     font-weight: 600 !important;
+# }
+
+# /* ===== PODCAST EMPTY STATES ===== */
+# .podcast-empty-state {
+#     text-align: center;
+#     padding: 3rem 2rem;
+#     background: var(--gray-50);
+#     border: 2px dashed var(--gray-300);
+#     border-radius: 12px;
+# }
+
+# .podcast-empty-state-icon {
+#     font-size: 2.5rem;
+#     margin-bottom: 1rem;
+#     opacity: 0.5;
+# }
+
+# .podcast-empty-state-text {
+#     font-size: 0.9rem;
+#     color: var(--gray-600);
+#     max-width: 300px;
+#     margin: 0 auto;
+#     line-height: 1.5;
+# }
+
+# /* ===== PODCAST SUCCESS ANIMATIONS ===== */
+# .podcast-success-checkmark {
+#     display: inline-flex;
+#     align-items: center;
+#     justify-content: center;
+#     width: 48px;
+#     height: 48px;
+#     background: var(--gray-800);
+#     border-radius: 50%;
+#     color: var(--white);
+#     font-size: 1.5rem;
+#     animation: checkmark-pop 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+# }
+
+# @keyframes checkmark-pop {
+#     0% { transform: scale(0); }
+#     50% { transform: scale(1.2); }
+#     100% { transform: scale(1); }
+# }
+"""
+
 # Keep your full custom_css exactly as you had it.
 # I am not changing its contents for macOS, just keeping your file as one piece.
 
@@ -2240,8 +3223,89 @@ def _generate_persona_voice_preview(voice_id: str, voice_type: str) -> str | Non
 # --------------------------------------------------------------------------------------
 # Paste this whole Blocks section into your main file, replacing your existing
 # with gr.Blocks(...) as demo: block all the way down to the end of the UI wiring.
+def save_output_dir(p: Path) -> None:
+    payload = {"output_dir": str(p)}
+    with open(OUTPUT_DIR_FILE, "w") as f:
+        json.dump(payload, f, indent=2)
+
+
+def load_output_dir() -> Path:
+    if OUTPUT_DIR_FILE.exists():
+        try:
+            with open(OUTPUT_DIR_FILE) as f:
+                data = json.load(f)
+            raw = str(data.get("output_dir", "")).strip()
+            if raw:
+                return Path(raw).expanduser().resolve()
+        except Exception:
+            pass
+    return DEFAULT_OUTPUT_DIR
+
+
+def set_base_dirs(base: Path):
+    global BASE_OUTPUT_DIR, HISTORY_DIR, PODCASTS_DIR
+
+    BASE_OUTPUT_DIR = Path(base).resolve()
+    HISTORY_DIR = (BASE_OUTPUT_DIR / "generation_history").resolve()
+    PODCASTS_DIR = (BASE_OUTPUT_DIR / "podcasts").resolve()
+
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    PODCASTS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+set_base_dirs(load_output_dir())
+
+
+def open_folder_in_finder(folder_path: str):
+    p = str(folder_path or "").strip()
+    if not p:
+        return "No folder selected"
+    try:
+        path = Path(p).expanduser().resolve()
+        if platform.system() == "Darwin":
+            os.system(f'open "{path}"')
+        elif platform.system() == "Windows":
+            os.system(f'start "" "{path}"')
+        else:
+            os.system(f'xdg-open "{path}"')
+        return f"Opened: {path}"
+    except Exception as e:
+        return f"Error: {format_user_error(e)}"
+
+
+def apply_output_dir(new_dir: str):
+    if not new_dir or not str(new_dir).strip():
+        return gr.update(), "No folder selected"
+
+    p = Path(new_dir).expanduser()
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+        save_output_dir(p)
+        set_base_dirs(p)
+        return gr.update(value=str(p)), f"Using: {p}"
+    except Exception as e:
+        return gr.update(), f"Error: {format_user_error(e)}"
 
 with gr.Blocks(title="Qwen3-TTS Studio") as demo:
+    gr.HTML("<div style='font-weight:600;margin:0.25rem 0;'>Output folder for new generations</div>")
+    with gr.Row():
+        output_dir_text = gr.Textbox(value=str(BASE_OUTPUT_DIR), label="Output folder path", scale=4)
+        output_dir_apply = gr.Button("Apply", scale=1)
+        output_dir_open = gr.Button("Open", scale=1)
+
+    output_dir_status = gr.Textbox(label="", interactive=False, show_label=False)
+
+    output_dir_apply.click(
+        fn=apply_output_dir,
+        inputs=[output_dir_text],
+        outputs=[output_dir_text, output_dir_status],
+    )
+
+    output_dir_open.click(
+        fn=open_folder_in_finder,
+        inputs=[output_dir_text],
+        outputs=[output_dir_status],
+    )
     gr.HTML("""
     <div class="main-header">
         <h1 class="main-title">Qwen3-TTS Studio</h1>
@@ -2311,6 +3375,17 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                                 label="Generated Audio", type="filepath"
                             )
                             cv_download = gr.File(label="Download Audio", visible=False)
+                            with gr.Row():
+                                cv_save_path = gr.Textbox(
+                                    value="~/Desktop",
+                                    label="Save to",
+                                    placeholder="~/Desktop/my_audio.wav",
+                                    scale=3,
+                                )
+                                cv_saveas_btn = gr.Button("Save", size="sm", scale=1)
+                                cv_save_status = gr.Textbox(
+                                    show_label=False, interactive=False, scale=2
+                                )
 
                             gr.HTML(
                                 '<div class="history-section"><div class="history-header">Recent History</div></div>'
@@ -2463,6 +3538,17 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                             vc_status = gr.Textbox(label="Status", interactive=False)
                             vc_output = gr.Audio(label="Test Output", type="filepath")
                             vc_download = gr.File(label="Download Audio", visible=False)
+                            with gr.Row():
+                                vc_save_path = gr.Textbox(
+                                    value="~/Desktop",
+                                    label="Save to",
+                                    placeholder="~/Desktop/my_audio.wav",
+                                    scale=3,
+                                )
+                                vc_saveas_btn = gr.Button("Save", size="sm", scale=1)
+                                vc_save_status = gr.Textbox(
+                                    show_label=False, interactive=False, scale=2
+                                )
 
                             gr.HTML(
                                 '<div class="section-header" style="margin-top:1rem;">Save Cloned Voice</div>'
@@ -2549,6 +3635,17 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                                 label="Generated Audio", type="filepath"
                             )
                             sv_download = gr.File(label="Download Audio", visible=False)
+                            with gr.Row():
+                                sv_save_path = gr.Textbox(
+                                    value="~/Desktop",
+                                    label="Save to",
+                                    placeholder="~/Desktop/my_audio.wav",
+                                    scale=3,
+                                )
+                                sv_saveas_btn = gr.Button("Save", size="sm", scale=1)
+                                sv_save_status = gr.Textbox(
+                                    show_label=False, interactive=False, scale=2
+                                )
 
                             gr.HTML(
                                 '<div class="history-section"><div class="history-header">Recent History</div></div>'
@@ -3245,6 +4342,17 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
                             podcast_download = gr.File(
                                 label="Download Podcast", visible=False
                             )
+                            with gr.Row():
+                                podcast_save_path = gr.Textbox(
+                                    value="~/Desktop",
+                                    label="Save to",
+                                    placeholder="~/Desktop/my_podcast.wav",
+                                    scale=3,
+                                )
+                                podcast_saveas_btn = gr.Button("Save", size="sm", scale=1)
+                                podcast_save_status = gr.Textbox(
+                                    show_label=False, interactive=False, scale=2
+                                )
 
                             gr.HTML(
                                 '<div class="history-section"><div class="history-header">Podcast History</div></div>'
@@ -4676,6 +5784,27 @@ with gr.Blocks(title="Qwen3-TTS Studio") as demo:
         outputs=[slot[1] for slot in podcast_speaker_slots],
     )
 
+    cv_saveas_btn.click(
+        fn=save_audio_to_path,
+        inputs=[cv_audio, cv_save_path],
+        outputs=[cv_save_status],
+    )
+    vc_saveas_btn.click(
+        fn=save_audio_to_path,
+        inputs=[vc_output, vc_save_path],
+        outputs=[vc_save_status],
+    )
+    sv_saveas_btn.click(
+        fn=save_audio_to_path,
+        inputs=[sv_audio, sv_save_path],
+        outputs=[sv_save_status],
+    )
+    podcast_saveas_btn.click(
+        fn=save_audio_to_path,
+        inputs=[podcast_final_audio, podcast_save_path],
+        outputs=[podcast_save_status],
+    )
+
 if __name__ == "__main__":
     print("Starting Qwen3-TTS Studio...")
     print("=" * 50)
@@ -4688,4 +5817,9 @@ if __name__ == "__main__":
     print("  • Export history to ZIP")
     print("=" * 50)
     demo.queue(default_concurrency_limit=1)
-    demo.launch(server_name="127.0.0.1", server_port=7860, css=custom_css)
+    demo.launch(
+    server_name="127.0.0.1",
+    server_port=7860,
+    css=custom_css,
+    allowed_paths=[str(BASE_OUTPUT_DIR)],
+)
